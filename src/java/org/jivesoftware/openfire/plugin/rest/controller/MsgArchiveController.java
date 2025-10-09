@@ -36,12 +36,30 @@ public class MsgArchiveController {
 
     /** The Constant INSTANCE. */
     public static final MsgArchiveController INSTANCE = new MsgArchiveController();
-
-    /** The Constant USER_MESSAGE_COUNT. */
-    private static final String USER_MESSAGE_COUNT = "select COUNT(1) from ofMessageArchive a " +
-            "join ofPresence p on (a.sentDate > p.offlineDate) " +
-            "WHERE a.toJID = ? AND p.username = ?";
-
+    /**
+     * Builds the SQL query for counting unread messages based on the underlying database type.
+     *
+     * @param con the database connection used to detect the database product name
+     * @return the database-specific SQL query string for counting unread messages
+     * @throws SQLException if a database access error occurs while retrieving metadata
+     */
+    private String buildUserMessageCountQuery(Connection con) throws SQLException {
+        String db = con.getMetaData().getDatabaseProductName().toLowerCase();
+        String castExpr;
+    
+        if (db.contains("mysql")) {
+            castExpr = "CAST(p.offlineDate AS SIGNED)";
+        } else if (db.contains("oracle")) {
+            castExpr = "CAST(p.offlineDate AS NUMBER)";
+        } else {
+            // PostgreSQL, SQL Server, Sybase — all understand BIGINT in CAST
+            castExpr = "CAST(p.offlineDate AS BIGINT)";
+        }
+    
+        return "SELECT COUNT(1) FROM ofMessageArchive a " +
+               "JOIN ofPresence p ON (a.sentDate > " + castExpr + ") " +
+               "WHERE a.toJID = ? AND p.username = ?";
+    }
     /**
      * Gets the single instance of MsgArchiveController.
      *
@@ -70,7 +88,8 @@ public class MsgArchiveController {
         ResultSet rs = null;
         try {
             con = DbConnectionManager.getConnection();
-            pstmt = con.prepareStatement(USER_MESSAGE_COUNT);
+            String userMessageCount = buildUserMessageCountQuery(con);
+            pstmt = con.prepareStatement(userMessageCount);
             pstmt.setString(1, jid.toBareJID());
             pstmt.setString(2, jid.getNode());
             rs = pstmt.executeQuery();
